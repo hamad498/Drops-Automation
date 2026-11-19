@@ -1,15 +1,10 @@
-from selenium.common.exceptions import (
-    ElementClickInterceptedException,
-    NoSuchElementException,
-    StaleElementReferenceException,
-)
-from selenium.webdriver.common.keys import Keys
 from pathlib import Path
-
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
     NoSuchElementException,
     StaleElementReferenceException,
+    TimeoutException,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -19,20 +14,30 @@ from pages.base_page import BasePage
 
 
 class JobPage(BasePage):
-    MENU = (By.CSS_SELECTOR, "a[ng-click='LoadJobGrid()']")
-    ADD = (By.CSS_SELECTOR, "button[ng-click='LoadJobAdminView()']")
+    MENU = (
+        By.CSS_SELECTOR,
+        "a[ng-click='LoadJobGrid()']",
+    )
+    ADD = (
+        By.CSS_SELECTOR,
+        "button[ng-click='LoadJobAdminView()']",
+    )
     SAVE = (
         By.CSS_SELECTOR,
         "button[type='submit'][ng-disabled='JobForm.$invalid']",
     )
 
-    NUMBER = (By.CSS_SELECTOR, "input[ng-model='JobControls.JobNumber']")
+    NUMBER = (
+        By.CSS_SELECTOR,
+        "input[ng-model='JobControls.JobNumber']",
+    )
     DESCRIPTION = (
         By.CSS_SELECTOR,
         "input[ng-model='JobControls.JobDescription']",
     )
     INSPECTION_DATE = (By.ID, "txtInspectionDate")
     NEXT_INSPECTION = (By.ID, "txtNextInpsection")
+
     STATUS = (
         By.CSS_SELECTOR,
         "select[ng-model='JobControls.JobStauts']",
@@ -49,8 +54,44 @@ class JobPage(BasePage):
         By.CSS_SELECTOR,
         "select[ng-model='JobControls.RigID']",
     )
+
     ONGOING_ACCESS = (By.ID, "IsOngoingAccess")
     AUTO_REFERENCE = (By.ID, "ckcheckbox")
+    OVERLAY = (By.CSS_SELECTOR, ".splash-loading")
+
+    OPTIONAL_TEXT_FIELDS = {
+        "po_number": (
+            By.CSS_SELECTOR,
+            "input[ng-model='JobControls.PONumber']",
+        ),
+        "report_issue_date": (
+            By.CSS_SELECTOR,
+            "input[ng-model='JobControls.ReportIssueDate']",
+        ),
+        "report_number": (
+            By.CSS_SELECTOR,
+            "input[ng-model='JobControls.RefReportNo']",
+        ),
+        "inspection_reference": (
+            By.CSS_SELECTOR,
+            "input[ng-model='JobControls.InspReference']",
+        ),
+    }
+
+    OPTIONAL_SELECT_FIELDS = {
+        "paid_status": (
+            By.CSS_SELECTOR,
+            "select[ng-model='JobControls.PaidStatus']",
+        ),
+        "reporting_office": (
+            By.CSS_SELECTOR,
+            "select[ng-model='JobControls.ReportingOfficeId']",
+        ),
+        "technical_manager": (
+            By.CSS_SELECTOR,
+            "select[ng-model='JobControls.ReportManagerId']",
+        ),
+    }
 
     INSPECTOR = (
         By.CSS_SELECTOR,
@@ -67,24 +108,35 @@ class JobPage(BasePage):
 
     SECTION_NAME = (By.ID, "txtSecName")
     REPORT_UPLOAD = (By.ID, "PdfAddInspFInp")
-    REPORT_SEARCH = (By.CSS_SELECTOR, "input[ng-model='SFilter']")
+    REPORT_SEARCH = (
+        By.CSS_SELECTOR,
+        "input[ng-model='SFilter']",
+    )
     REPORT_ROWS = (
         By.XPATH,
         "//tr[td//span[@ng-bind='J.SectionName']]",
     )
-    
 
     CONTRACT_UPLOAD = (By.ID, "PdfInp")
     CONTRACT_LINK = (By.CSS_SELECTOR, "a#Pdftextbox")
 
-    SEARCH = (By.CSS_SELECTOR, "input[ng-model='SearchWord']")
+    SEARCH = (
+        By.CSS_SELECTOR,
+        "input[ng-model='SearchWord']",
+    )
     SEARCH_BUTTON = (
         By.CSS_SELECTOR,
         "button[ng-click='GetJobSearch()']",
     )
-    ROWS = (By.CSS_SELECTOR, "tr[ng-repeat='J in JobData']")
+    ROWS = (
+        By.CSS_SELECTOR,
+        "tr[ng-repeat='J in JobData']",
+    )
 
-    POPUP_MESSAGE = (By.CSS_SELECTOR, ".sweet-alert.visible > p")
+    POPUP_MESSAGE = (
+        By.CSS_SELECTOR,
+        ".sweet-alert.visible > p",
+    )
     POPUP_OK = (
         By.CSS_SELECTOR,
         ".sweet-alert.visible button.confirm",
@@ -99,25 +151,48 @@ class JobPage(BasePage):
     def visible(self, locator):
         return self.wait_for_visible(locator)
 
+    def scroll_to(self, element):
+        self.driver.execute_script(
+            """
+            arguments[0].scrollIntoView({
+                block: 'center',
+                inline: 'nearest',
+                behavior: 'instant'
+            });
+            """,
+            element,
+        )
+
+    def loading_visible(self, driver):
+        return any(
+            element.is_displayed()
+            for element in driver.find_elements(*self.OVERLAY)
+        )
+
+    def close_datepicker(self):
+        # Send Escape as a keyboard action.
+        # Do not call send_keys on the active file input.
+        ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+
     def click(self, locator):
+        self.close_datepicker()
+
         def attempt(driver):
             try:
-                element = driver.find_element(*locator)
-
-                if not element.is_displayed() or not element.is_enabled():
+                if self.loading_visible(driver):
                     return False
 
-                driver.execute_script(
-                    """
-                    arguments[0].scrollIntoView({
-                        block: 'center',
-                        inline: 'nearest',
-                        behavior: 'instant'
-                    });
-                    """,
-                    element,
-                )
+                elements = [
+                    element
+                    for element in driver.find_elements(*locator)
+                    if element.is_displayed() and element.is_enabled()
+                ]
 
+                if len(elements) != 1:
+                    return False
+
+                element = elements[0]
+                self.scroll_to(element)
                 element.click()
                 return True
 
@@ -130,17 +205,20 @@ class JobPage(BasePage):
         )
 
     def set_text(self, locator, value):
-        from selenium.common.exceptions import TimeoutException
-
         value = str(value)
         last_issue = {"detail": "Field was not ready."}
 
+        self.close_datepicker()
+
         def attempt(driver):
             try:
+                if self.loading_visible(driver):
+                    last_issue["detail"] = "Loading overlay is visible."
+                    return False
+
                 fields = driver.find_elements(*locator)
                 visible_fields = [
-                    field for field in fields
-                    if field.is_displayed()
+                    field for field in fields if field.is_displayed()
                 ]
 
                 if len(visible_fields) != 1:
@@ -156,33 +234,40 @@ class JobPage(BasePage):
                     last_issue["detail"] = "Field is disabled."
                     return False
 
-                driver.execute_script(
-                    """
-                    arguments[0].scrollIntoView({
-                        block: 'center',
-                        inline: 'nearest',
-                        behavior: 'instant'
-                    });
-                    """,
-                    field,
-                )
+                if field.get_property("readOnly"):
+                    last_issue["detail"] = "Field is read-only."
+                    return False
 
-                field.click()
+                self.scroll_to(field)
+
+                # send_keys focuses the input without a mouse click.
+                # A calendar overlapping the input cannot intercept that click.
+                field.send_keys(Keys.ESCAPE)
                 field.send_keys(Keys.CONTROL, "a")
                 field.send_keys(Keys.BACKSPACE)
 
                 if value:
                     field.send_keys(value)
 
+                # Close the current calendar and trigger the field's blur event.
+                field.send_keys(Keys.ESCAPE)
                 field.send_keys(Keys.TAB)
 
-                actual = field.get_property("value")
+                # Tab may focus another date input and open its calendar.
+                self.close_datepicker()
+
+                # Re-find after Angular updates.
+                actual = driver.find_element(
+                    *locator
+                ).get_property("value")
+
                 last_issue["detail"] = f"Actual field value: {actual!r}"
                 return actual == value
 
             except self.RETRY_ERRORS as error:
                 last_issue["detail"] = (
-                    f"{type(error).__name__}: {str(error).split('Stacktrace:')[0]}"
+                    f"{type(error).__name__}: "
+                    f"{str(error).split('Stacktrace:')[0]}"
                 )
                 return False
 
@@ -191,6 +276,7 @@ class JobPage(BasePage):
                 attempt,
                 message=f"Could not enter text: {locator}",
             )
+
         except TimeoutException as error:
             screenshot = Path("screenshots/job_text_entry_failed.png")
             screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -203,15 +289,29 @@ class JobPage(BasePage):
             ) from error
 
     def select_text(self, locator, text):
+        self.close_datepicker()
+
         def attempt(driver):
             try:
-                element = driver.find_element(*locator)
-                if not element.is_displayed() or not element.is_enabled():
+                if self.loading_visible(driver):
                     return False
 
+                elements = [
+                    element
+                    for element in driver.find_elements(*locator)
+                    if element.is_displayed() and element.is_enabled()
+                ]
+
+                if len(elements) != 1:
+                    return False
+
+                element = elements[0]
+                self.scroll_to(element)
                 dropdown = Select(element)
+
                 matching = [
-                    option for option in dropdown.options
+                    option
+                    for option in dropdown.options
                     if option.text.strip() == text
                 ]
 
@@ -223,7 +323,11 @@ class JobPage(BasePage):
                 )
 
                 dropdown.select_by_visible_text(text)
-                return dropdown.first_selected_option.text.strip() == text
+
+                return (
+                    dropdown.first_selected_option.text.strip() == text
+                )
+
             except self.RETRY_ERRORS:
                 return False
 
@@ -233,56 +337,110 @@ class JobPage(BasePage):
         )
 
     def set_checkbox(self, locator, checked):
+        checked = bool(checked)
+        last_issue = {"detail": "Checkbox was not ready."}
+
+        self.close_datepicker()
+
         def attempt(driver):
             try:
-                checkbox = driver.find_element(*locator)
-                if not checkbox.is_displayed() or not checkbox.is_enabled():
+                if self.loading_visible(driver):
+                    last_issue["detail"] = "Loading overlay is visible."
                     return False
 
-                if checkbox.is_selected() != checked:
+                matches = driver.find_elements(*locator)
+                visible = [
+                    element
+                    for element in matches
+                    if element.is_displayed()
+                ]
+
+                if len(visible) != 1:
+                    last_issue["detail"] = (
+                        f"Matching checkboxes: {len(matches)}; "
+                        f"visible: {len(visible)}"
+                    )
+                    return False
+
+                checkbox = visible[0]
+
+                if not checkbox.is_enabled():
+                    last_issue["detail"] = "Checkbox is disabled."
+                    return False
+
+                if checkbox.is_selected() == checked:
+                    return True
+
+                self.scroll_to(checkbox)
+                self.close_datepicker()
+
+                try:
                     checkbox.click()
 
-                return checkbox.is_selected() == checked
-            except self.RETRY_ERRORS:
+                except ElementClickInterceptedException as error:
+                    last_issue["detail"] = (
+                        "Mouse click intercepted: "
+                        f"{str(error).split('Stacktrace:')[0]}"
+                    )
+
+                    # Space toggles a checkbox through normal keyboard input.
+                    checkbox.send_keys(Keys.SPACE)
+
+                # Re-find after Angular updates.
+                current = [
+                    element
+                    for element in driver.find_elements(*locator)
+                    if element.is_displayed()
+                ]
+
+                if len(current) != 1:
+                    last_issue["detail"] = (
+                        "Checkbox changed during the update."
+                    )
+                    return False
+
+                actual = current[0].is_selected()
+
+                last_issue["detail"] = (
+                    f"Expected selected={checked}; actual={actual}"
+                )
+                return actual == checked
+
+            except self.RETRY_ERRORS as error:
+                last_issue["detail"] = (
+                    f"{type(error).__name__}: "
+                    f"{str(error).split('Stacktrace:')[0]}"
+                )
                 return False
 
-        self.wait.until(attempt, message=f"Could not set checkbox: {locator}")
+        try:
+            self.wait.until(
+                attempt,
+                message=f"Could not set checkbox: {locator}",
+            )
+
+        except TimeoutException as error:
+            screenshot = Path(
+                "screenshots/job_checkbox_failed.png"
+            )
+            screenshot.parent.mkdir(parents=True, exist_ok=True)
+            self.driver.save_screenshot(str(screenshot))
+
+            raise AssertionError(
+                f"Could not set checkbox: {locator}\n"
+                f"Expected selected: {checked}\n"
+                f"Last issue: {last_issue['detail']}\n"
+                f"Screenshot: {screenshot.resolve()}"
+            ) from error
 
     def open(self):
-        from selenium.common.exceptions import TimeoutException
-
         try:
             self.click(self.MENU)
+
         except TimeoutException as error:
             screenshot = Path("screenshots/jobs_menu_blocked.png")
             screenshot.parent.mkdir(parents=True, exist_ok=True)
             self.driver.save_screenshot(str(screenshot))
-
-            details = self.driver.execute_script(
-                """
-                const links = Array.from(document.querySelectorAll(
-                    "a[ng-click='LoadJobGrid()']"
-                ));
-
-                return links.map(link => {
-                    const rect = link.getBoundingClientRect();
-                    const x = Math.max(
-                        0, Math.min(innerWidth - 1, rect.x + rect.width / 2)
-                    );
-                    const y = Math.max(
-                        0, Math.min(innerHeight - 1, rect.y + rect.height / 2)
-                    );
-                    const top = document.elementFromPoint(x, y);
-
-                    return {
-                        text: link.innerText,
-                        width: rect.width,
-                        height: rect.height,
-                        coveringElement: top ? top.outerHTML.slice(0, 600) : null
-                    };
-                });
-                """
-            )
 
             messages = [
                 element.text.strip()
@@ -293,8 +451,7 @@ class JobPage(BasePage):
             ]
 
             raise AssertionError(
-                f"Jobs List navigation failed after Update.\n"
-                f"Menu details: {details}\n"
+                "Jobs List navigation failed.\n"
                 f"Visible popup messages: {messages}\n"
                 f"Screenshot: {screenshot.resolve()}"
             ) from error
@@ -304,8 +461,20 @@ class JobPage(BasePage):
 
     def open_add_form(self):
         self.click(self.ADD)
+
+        def empty_form(driver):
+            try:
+                field = driver.find_element(*self.NUMBER)
+                return (
+                    field.is_displayed()
+                    and field.get_property("value") == ""
+                )
+            except self.RETRY_ERRORS:
+                return False
+
         self.wait.until(
-            lambda driver: self.visible(self.NUMBER).get_property("value") == ""
+            empty_form,
+            message="Empty Add Job form did not open.",
         )
 
     def fill_form(
@@ -331,11 +500,21 @@ class JobPage(BasePage):
         self.select_text(self.CLIENT, client_name)
         self.select_text(self.RIG, rig_name)
 
+    def fill_additional_fields(self, values):
+        for key, locator in self.OPTIONAL_TEXT_FIELDS.items():
+            self.set_text(locator, values[key])
+
+        for key, locator in self.OPTIONAL_SELECT_FIELDS.items():
+            self.select_text(locator, values[key])
+
     def save_and_assign(self):
         self.click(self.SAVE)
 
         def saved_form_ready(driver):
             try:
+                if self.loading_visible(driver):
+                    return False
+
                 button = driver.find_element(*self.SAVE)
                 inspector = driver.find_element(*self.INSPECTOR)
 
@@ -344,12 +523,16 @@ class JobPage(BasePage):
                     and button.text.strip() == "Update"
                     and inspector.is_displayed()
                 )
+
             except self.RETRY_ERRORS:
                 return False
 
         self.wait.until(
             saved_form_ready,
-            message="Job did not reach the Update / Inspector assignment form.",
+            message=(
+                "Job did not reach the Update / "
+                "Inspector assignment form."
+            ),
         )
 
     def update(self):
@@ -365,17 +548,23 @@ class JobPage(BasePage):
         def assigned(driver):
             try:
                 names = []
+
                 for row in driver.find_elements(*self.INSPECTOR_ROWS):
-                    if row.is_displayed():
-                        cells = row.find_elements(By.TAG_NAME, "td")
-                        if cells:
-                            names.append(cells[0].text.strip())
+                    if not row.is_displayed():
+                        continue
+
+                    cells = row.find_elements(By.TAG_NAME, "td")
+
+                    if cells:
+                        names.append(cells[0].text.strip())
 
                 count = names.count(inspector_name)
+
                 assert count <= 1, (
                     f"Inspector assigned more than once: {inspector_name}"
                 )
                 return count == 1
+
             except StaleElementReferenceException:
                 return False
 
@@ -386,29 +575,30 @@ class JobPage(BasePage):
 
     def upload_file(self, locator, file_path):
         path = Path(file_path).resolve()
+
         assert path.is_file(), f"Test PDF missing: {path}"
         assert path.stat().st_size > 0, f"Test PDF is empty: {path}"
 
         def find_upload_input(driver):
-            fields = driver.find_elements(*locator)
+            try:
+                if self.loading_visible(driver):
+                    return False
 
-            # File input hidden ho sakta hai; uska upload button visible ho.
-            active_fields = [
-                field
-                for field in fields
-                if field.is_enabled()
-                and field.find_element(By.XPATH, "..").is_displayed()
-            ]
+                active_fields = [
+                    field
+                    for field in driver.find_elements(*locator)
+                    if field.is_enabled()
+                    and field.find_element(By.XPATH, "..").is_displayed()
+                ]
 
-            if len(active_fields) == 1:
-                return active_fields[0]
-
-            if len(active_fields) > 1:
-                raise AssertionError(
+                assert len(active_fields) <= 1, (
                     f"Multiple active upload inputs found: {locator}"
                 )
 
-            return False
+                return active_fields[0] if active_fields else False
+
+            except self.RETRY_ERRORS:
+                return False
 
         field = self.wait.until(
             find_upload_input,
@@ -417,24 +607,27 @@ class JobPage(BasePage):
 
         field.send_keys(str(path))
 
-        selected_files = self.driver.execute_script(
-            """
-            return Array.from(arguments[0].files || []).map(
-                file => ({
-                    name: file.name,
-                    size: file.size,
-                    type: file.type
-                })
-            );
-            """,
-            field,
-        )
+        try:
+            selected_files = self.driver.execute_script(
+                """
+                return Array.from(arguments[0].files || []).map(
+                    file => ({
+                        name: file.name,
+                        size: file.size,
+                        type: file.type
+                    })
+                );
+                """,
+                field,
+            )
+        except StaleElementReferenceException:
+            # The upload handler may replace its input immediately.
+            selected_files = []
 
         print(f"Upload input: {locator}")
         print(f"Selected files: {selected_files}")
 
-        # Kuch upload handlers processing ke baad input reset kar dete hain.
-        # Is liye actual success ko report row/link se verify karte hain.
+        # The report row or contract link verifies the upload result.
         if selected_files:
             assert len(selected_files) == 1
             assert selected_files[0]["name"] == path.name
@@ -451,12 +644,8 @@ class JobPage(BasePage):
             f"Section Name was not entered correctly: {actual_name!r}"
         )
 
-        # Clear any report filter before looking for the uploaded row.
         self.set_text(self.REPORT_SEARCH, "")
-
         self.upload_file(self.REPORT_UPLOAD, file_path)
-
-        from selenium.common.exceptions import TimeoutException
 
         try:
             return self.wait_for_report(section_name)
@@ -473,7 +662,6 @@ class JobPage(BasePage):
                 )
                 if element.is_displayed()
             ]
-
             report_rows = [
                 row.text.strip()
                 for row in self.driver.find_elements(*self.REPORT_ROWS)
@@ -481,7 +669,7 @@ class JobPage(BasePage):
             ]
 
             raise AssertionError(
-                f"Uploaded report could not be verified.\n"
+                "Uploaded report could not be verified.\n"
                 f"Expected Section: {section_name!r}\n"
                 f"Visible popup messages: {popup_messages!r}\n"
                 f"Visible report rows: {report_rows!r}\n"
@@ -498,7 +686,11 @@ class JobPage(BasePage):
                         continue
 
                     cells = row.find_elements(By.TAG_NAME, "td")
-                    if cells and cells[0].text.strip() == section_name:
+
+                    if (
+                        cells
+                        and cells[0].text.strip() == section_name
+                    ):
                         matches.append(row)
 
                 if not matches:
@@ -510,17 +702,23 @@ class JobPage(BasePage):
 
                 row = matches[0]
                 link = row.find_element(
-                    By.CSS_SELECTOR, "a[ng-click='AddInspFileView(J)']"
+                    By.CSS_SELECTOR,
+                    "a[ng-click='AddInspFileView(J)']",
                 )
                 order_field = row.find_element(
-                    By.CSS_SELECTOR, "input[ng-model='J.FileOrder']"
+                    By.CSS_SELECTOR,
+                    "input[ng-model='J.FileOrder']",
                 )
 
                 if not link.is_displayed():
                     return False
 
                 actual_order = order_field.get_property("value")
-                if order is not None and actual_order != str(order):
+
+                if (
+                    order is not None
+                    and actual_order != str(order)
+                ):
                     return False
 
                 return {
@@ -528,12 +726,16 @@ class JobPage(BasePage):
                     "link_text": link.text.strip(),
                     "order": actual_order,
                 }
+
             except self.RETRY_ERRORS:
                 return False
 
         return self.wait.until(
             read_report,
-            message=f"Report missing or values did not match: {section_name}",
+            message=(
+                "Report missing or values did not match: "
+                f"{section_name}"
+            ),
         )
 
     def upload_contract(self, file_path):
@@ -542,10 +744,8 @@ class JobPage(BasePage):
         def read_attachment_name(driver):
             try:
                 for link in driver.find_elements(*self.CONTRACT_LINK):
-                    if link.is_displayed():
-                        text = link.text.strip()
-                        if text:
-                            return text
+                    if link.is_displayed() and link.text.strip():
+                        return link.text.strip()
 
                 return False
 
@@ -572,53 +772,97 @@ class JobPage(BasePage):
                 continue
 
             cells = row.find_elements(By.TAG_NAME, "td")
+
             if cells and cells[0].text.strip() == job_number:
                 matches.append(row)
 
         return matches
 
-    def wait_for_job_details(self, expected):
-        def read_details(driver):
+    def get_job_grid_details(self, job_number):
+        def read(driver):
             try:
-                rows = self.matching_rows(expected["number"])
+                if self.loading_visible(driver):
+                    return False
+
+                rows = self.matching_rows(job_number)
+
                 if not rows:
                     return False
 
                 assert len(rows) == 1, (
-                    f"Multiple Jobs found: {expected['number']}"
+                    f"Multiple Jobs found: {job_number}"
                 )
 
-                cells = rows[0].find_elements(By.TAG_NAME, "td")
+                row = rows[0]
+                cells = row.find_elements(By.TAG_NAME, "td")
+
                 if len(cells) < 6:
                     return False
 
-                actual = {
+                paid_status_cells = row.find_elements(
+                    By.CSS_SELECTOR,
+                    "span[ng-bind='J.PaidStatus']",
+                )
+
+                # Keep blank values blank so the test reports the mismatch.
+                paid_status = (
+                    paid_status_cells[0].text.strip()
+                    if paid_status_cells
+                    else "<Paid Status column missing>"
+                )
+
+                return {
                     "number": cells[0].text.strip(),
                     "description": cells[1].text.strip(),
-                    "inspectors": [
+                    "inspectors": sorted(
                         name.strip()
                         for name in cells[2].text.split(",")
                         if name.strip()
-                    ],
+                    ),
                     "inspection_date": cells[3].text.strip(),
                     "client": cells[4].text.strip(),
                     "rig": cells[5].text.strip(),
+                    "paid_status": paid_status,
                 }
 
-                if actual == expected:
-                    return actual
-                return False
-            except StaleElementReferenceException:
+            except self.RETRY_ERRORS:
                 return False
 
         return self.wait.until(
-            read_details,
-            message=f"Saved Job grid values did not match: {expected}",
+            read,
+            message=f"Job row unavailable: {job_number}",
+        )
+
+    def wait_for_job_details(self, expected):
+        def matches(driver):
+            actual = self.get_job_grid_details(expected["number"])
+
+            if all(
+                actual.get(key) == value
+                for key, value in expected.items()
+            ):
+                return {
+                    key: actual[key]
+                    for key in expected
+                }
+
+            return False
+
+        return self.wait.until(
+            matches,
+            message=(
+                f"Saved Job grid values did not match: {expected}"
+            ),
         )
 
     def edit(self, job_number):
+        self.close_datepicker()
+
         def attempt(driver):
             try:
+                if self.loading_visible(driver):
+                    return False
+
                 rows = self.matching_rows(job_number)
 
                 if not rows:
@@ -633,20 +877,13 @@ class JobPage(BasePage):
                     "span[title='Edit Record']",
                 )
 
-                if not action.is_displayed() or not action.is_enabled():
+                if (
+                    not action.is_displayed()
+                    or not action.is_enabled()
+                ):
                     return False
 
-                driver.execute_script(
-                    """
-                    arguments[0].scrollIntoView({
-                        block: 'center',
-                        inline: 'nearest',
-                        behavior: 'instant'
-                    });
-                    """,
-                    action,
-                )
-
+                self.scroll_to(action)
                 action.click()
                 return True
 
@@ -673,41 +910,75 @@ class JobPage(BasePage):
             message=f"Edit form did not open for Job: {job_number}",
         )
 
+    def read_field(self, key):
+        text_fields = {
+            "number": self.NUMBER,
+            "description": self.DESCRIPTION,
+            "inspection_date": self.INSPECTION_DATE,
+            "next_inspection": self.NEXT_INSPECTION,
+            **self.OPTIONAL_TEXT_FIELDS,
+        }
+        select_fields = {
+            "status": self.STATUS,
+            "stage": self.STAGE,
+            "client": self.CLIENT,
+            "rig": self.RIG,
+            **self.OPTIONAL_SELECT_FIELDS,
+        }
+        checkboxes = {
+            "ongoing_access": self.ONGOING_ACCESS,
+            "auto_reference": self.AUTO_REFERENCE,
+        }
+
+        if key in text_fields:
+            return self.visible(
+                text_fields[key]
+            ).get_property("value")
+
+        if key in select_fields:
+            return Select(
+                self.visible(select_fields[key])
+            ).first_selected_option.text.strip()
+
+        if key in checkboxes:
+            return self.visible(checkboxes[key]).is_selected()
+
+        raise KeyError(f"Unknown Job field: {key}")
+
     def get_form_details(self):
+        keys = (
+            "number",
+            "description",
+            "inspection_date",
+            "next_inspection",
+            "status",
+            "stage",
+            "client",
+            "rig",
+            "ongoing_access",
+            "auto_reference",
+        )
+
         return {
-            "number": self.visible(self.NUMBER).get_property("value"),
-            "description": self.visible(self.DESCRIPTION).get_property("value"),
-            "inspection_date": (
-                self.visible(self.INSPECTION_DATE).get_property("value")
-            ),
-            "next_inspection": (
-                self.visible(self.NEXT_INSPECTION).get_property("value")
-            ),
-            "status": Select(
-                self.visible(self.STATUS)
-            ).first_selected_option.text.strip(),
-            "stage": Select(
-                self.visible(self.STAGE)
-            ).first_selected_option.text.strip(),
-            "client": Select(
-                self.visible(self.CLIENT)
-            ).first_selected_option.text.strip(),
-            "rig": Select(
-                self.visible(self.RIG)
-            ).first_selected_option.text.strip(),
-            "ongoing_access": self.visible(self.ONGOING_ACCESS).is_selected(),
-            "auto_reference": self.visible(self.AUTO_REFERENCE).is_selected(),
+            key: self.read_field(key)
+            for key in keys
         }
 
     def wait_for_form_details(self, expected):
         def read_details(driver):
             try:
-                actual = self.get_form_details()
+                actual = {
+                    key: self.read_field(key)
+                    for key in expected
+                }
                 return actual if actual == expected else False
+
             except self.RETRY_ERRORS:
                 return False
 
         return self.wait.until(
             read_details,
-            message=f"Reopened Job form values did not match: {expected}",
+            message=(
+                f"Reopened Job form values did not match: {expected}"
+            ),
         )

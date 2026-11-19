@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
     NoSuchElementException,
@@ -27,9 +29,28 @@ class InspectorPage(BasePage):
     NAME = (By.ID, "txtInspector")
     EMAIL = (By.ID, "txtEmailAddress")
     QUALIFICATION = (By.ID, "txtQualification")
+
     SAVE_BUTTON = (
         By.CSS_SELECTOR,
         "button[form='inspectorForm'][type='submit']",
+    )
+    CLOSE_BUTTON = (
+        By.CSS_SELECTOR,
+        "button.close[ng-click='cancel()']",
+    )
+
+    SIGNATURE_INPUT = (
+        By.CSS_SELECTOR,
+        "input[type='file'][onload='onLoadOfInspectorSignature']",
+    )
+    REMOVE_SIGNATURE = (
+        By.CSS_SELECTOR,
+        "img[ng-click='RomoveSignatureFromArray($index)']",
+    )
+    SIGNATURE_PREVIEW = (
+        By.XPATH,
+        "//img[@ng-click='RomoveSignatureFromArray($index)']"
+        "/parent::*//img[not(@ng-click)]",
     )
 
     SEARCH = (
@@ -236,7 +257,6 @@ class InspectorPage(BasePage):
         def read_details(driver):
             try:
                 details = self.get_form_details()
-
                 return details if details == expected else False
 
             except (
@@ -248,4 +268,130 @@ class InspectorPage(BasePage):
         return self.wait.until(
             read_details,
             message=f"Inspector form values did not match: {expected}",
+        )
+
+    def wait_for_save_state(self, enabled):
+        def expected_state(driver):
+            try:
+                buttons = driver.find_elements(*self.SAVE_BUTTON)
+                visible = [
+                    button for button in buttons
+                    if button.is_displayed()
+                ]
+
+                return (
+                    len(visible) == 1
+                    and visible[0].is_enabled() == enabled
+                )
+
+            except StaleElementReferenceException:
+                return False
+
+        self.wait.until(
+            expected_state,
+            message=f"Inspector Save enabled state should be {enabled}.",
+        )
+
+    def is_save_enabled(self):
+        return self.wait_for_visible(self.SAVE_BUTTON).is_enabled()
+
+    def close_form(self):
+        self.click(self.CLOSE_BUTTON)
+        self.wait_for_grid()
+
+    def upload_signature(self, file_path):
+        path = Path(file_path).resolve()
+
+        assert path.is_file(), f"Signature image missing: {path}"
+        assert 0 < path.stat().st_size <= 1024 * 1024, (
+            "Use a non-empty signature image no larger than 1 MB."
+        )
+
+        def active_input(driver):
+            # The file input itself is intentionally hidden.
+            fields = driver.find_elements(*self.SIGNATURE_INPUT)
+            enabled = [
+                field for field in fields
+                if field.is_enabled()
+            ]
+
+            assert len(enabled) <= 1, (
+                "Multiple enabled Inspector signature inputs found."
+            )
+
+            return enabled[0] if enabled else False
+
+        field = self.wait.until(
+            active_input,
+            message="Inspector signature upload input was unavailable.",
+        )
+        field.send_keys(str(path))
+
+        return self.wait_for_signature()
+
+    def wait_for_signature(self):
+        def loaded_signature(driver):
+            try:
+                remove_buttons = [
+                    element
+                    for element in driver.find_elements(
+                        *self.REMOVE_SIGNATURE
+                    )
+                    if element.is_displayed()
+                ]
+
+                if not remove_buttons:
+                    return False
+
+                images = driver.find_elements(*self.SIGNATURE_PREVIEW)
+
+                for image in images:
+                    if not image.is_displayed():
+                        continue
+
+                    loaded = driver.execute_script(
+                        """
+                        return arguments[0].complete
+                            && arguments[0].naturalWidth > 0
+                            && arguments[0].naturalHeight > 0;
+                        """,
+                        image,
+                    )
+
+                    if loaded:
+                        return image.get_attribute("src")
+
+                return False
+
+            except (
+                NoSuchElementException,
+                StaleElementReferenceException,
+            ):
+                return False
+
+        return self.wait.until(
+            loaded_signature,
+            message="Inspector signature preview did not load.",
+        )
+
+    def remove_signature(self):
+        self.click(self.REMOVE_SIGNATURE)
+        self.wait_for_signature_absent()
+
+    def wait_for_signature_absent(self):
+        def absent(driver):
+            try:
+                return not any(
+                    element.is_displayed()
+                    for element in driver.find_elements(
+                        *self.REMOVE_SIGNATURE
+                    )
+                )
+
+            except StaleElementReferenceException:
+                return False
+
+        self.wait.until(
+            absent,
+            message="Inspector signature was still present.",
         )
