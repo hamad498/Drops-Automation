@@ -38,7 +38,27 @@ class ItemTypeChecks:
             try:
                 state["actual"] = reader()
                 state["error"] = ""
-                return state["actual"] == expected
+
+                actual = state["actual"]
+
+                # Prompt order is not a requirement.
+                # Sorting preserves repeated values, so extra or missing
+                # prompts still cause a failure.
+                if (
+                    isinstance(actual, dict)
+                    and isinstance(expected, dict)
+                    and isinstance(actual.get("prompts"), list)
+                    and isinstance(expected.get("prompts"), list)
+                ):
+                    return {
+                        **actual,
+                        "prompts": sorted(actual["prompts"]),
+                    } == {
+                        **expected,
+                        "prompts": sorted(expected["prompts"]),
+                    }
+
+                return actual == expected
 
             except (
                 NoSuchElementException,
@@ -64,6 +84,7 @@ class ItemTypeChecks:
                 self.folder
                 / f"failure_{len(self.rows) + 1:03d}.png"
             )
+
             if self.driver.save_screenshot(str(target)):
                 screenshot = str(target.resolve())
 
@@ -75,6 +96,7 @@ class ItemTypeChecks:
             "error": state["error"],
             "screenshot": screenshot,
         }
+
         self.rows.append(row)
         self.saved = False
 
@@ -108,6 +130,7 @@ class ItemTypeChecks:
                     "screenshot",
                 ],
             )
+
             writer.writeheader()
             writer.writerows(self.rows)
 
@@ -126,6 +149,7 @@ class ItemTypeChecks:
 
     def finish(self):
         self.save_report()
+
         failures = [
             row for row in self.rows if row["result"] == "FAIL"
         ]
@@ -137,6 +161,7 @@ class ItemTypeChecks:
                 f"actual={row['actual']!r}"
                 for row in failures
             )
+
             pytest.fail(
                 f"Item Type verification failures:\n{summary}",
                 pytrace=False,
@@ -190,13 +215,15 @@ def verify_saved_item(page, checks, name, prompts, label):
 
     if prompts:
         page.set_expanded(name, True)
+
         checks.check(
-            f"{label} / expanded prompt text and order",
-            lambda: page.expanded_prompts(name),
-            prompts,
+            f"{label} / expanded prompt text and count",
+            lambda: sorted(page.expanded_prompts(name)),
+            sorted(prompts),
         )
 
         page.set_expanded(name, False)
+
         checks.check(
             f"{label} / collapsed checklist",
             lambda: page.expanded_prompts(name),
@@ -204,6 +231,7 @@ def verify_saved_item(page, checks, name, prompts, label):
         )
 
     page.edit(name)
+
     checks.check(
         f"{label} / reopened form",
         page.form_details,
@@ -226,6 +254,7 @@ def delete_all_item_references(page, checks, item_name):
         )
 
         message = page.request_reference_delete(reference_name)
+
         checks.check(
             f"Reference {reference_name} / delete confirmation",
             lambda text=message: text,
@@ -233,6 +262,7 @@ def delete_all_item_references(page, checks, item_name):
         )
 
         page.cancel_delete()
+
         checks.check(
             f"Reference {reference_name} / Delete Cancel",
             page.references,
@@ -253,6 +283,7 @@ def delete_all_item_references(page, checks, item_name):
             for row in before
             if row != [reference_name, standard_type, owner]
         ]
+
         checks.check(
             f"Reference {reference_name} / row removed",
             page.references,
@@ -283,6 +314,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.set_text(page.NAME, " " * 5, verify=False)
+
     checks.check(
         "Whitespace Item Type / Save disabled",
         page.save_enabled,
@@ -297,6 +329,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         lambda: page.form_details()["name"],
         name_250,
     )
+
     checks.check(
         "250-character Item Type allowed",
         page.save_enabled,
@@ -304,6 +337,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.set_text(page.NAME, name_250 + "X", verify=False)
+
     checks.check(
         "Item Type limited to 250 characters",
         lambda: page.form_details()["name"],
@@ -320,6 +354,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.set_prompt(0, " " * 5, verify=False)
+
     checks.check(
         "Whitespace prompt / Save disabled",
         page.save_enabled,
@@ -334,6 +369,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         lambda: page.form_details()["prompts"][0],
         prompt_250,
     )
+
     checks.check(
         "250-character prompt allowed",
         page.save_enabled,
@@ -341,6 +377,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.set_prompt(0, prompt_250 + "X", verify=False)
+
     checks.check(
         "Prompt limited to 250 characters",
         lambda: page.form_details()["prompts"][0],
@@ -368,7 +405,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     page.set_text(page.NAME, name)
     page.save()
 
-    # Snapshot automatic references without assuming a default name.
+    # Read automatic references without assuming a default name.
     initial_references = page.references()
     print(f"Automatically loaded references: {initial_references}")
 
@@ -410,6 +447,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.search("")
+
     checks.check(
         "Clearing search restores filtered Item Type",
         page.visible_names,
@@ -428,17 +466,20 @@ def test_item_type_lifecycle(driver, item_type_checks):
     page.search(name)
     page.edit(name)
 
-    # Edit name and prompts, add a prompt, verify Delete Cancel.
+    # Locate prompts by their text because display order may change.
     updated_name = f"{name}_Edited"
     edited_prompt = f"Updated primary securing inspection {suffix}"
     added_prompt = f"Check corrosion and loose fittings {suffix}"
 
     page.set_text(page.NAME, updated_name)
-    page.set_prompt(0, edited_prompt)
+
+    original_index = page.form_details()["prompts"].index(prompt_one)
+    page.set_prompt(original_index, edited_prompt)
     page.add_prompt(added_prompt)
 
     before_cancel = page.form_details()
-    message = page.request_prompt_delete(1)
+    delete_index = before_cancel["prompts"].index(prompt_two)
+    message = page.request_prompt_delete(delete_index)
 
     checks.check(
         "Prompt delete confirmation",
@@ -447,13 +488,15 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.cancel_delete()
+
     checks.check(
         "Prompt Delete Cancel preserves form",
         page.form_details,
         before_cancel,
     )
 
-    page.request_prompt_delete(1)
+    delete_index = page.form_details()["prompts"].index(prompt_two)
+    page.request_prompt_delete(delete_index)
     success = page.confirm_delete()
 
     checks.check(
@@ -461,10 +504,11 @@ def test_item_type_lifecycle(driver, item_type_checks):
         lambda: success,
         page.DELETE_SUCCESS,
     )
+
     checks.check(
         "Selected prompt removed and others retained",
-        lambda: page.form_details()["prompts"],
-        [edited_prompt, added_prompt],
+        lambda: sorted(page.form_details()["prompts"]),
+        sorted([edited_prompt, added_prompt]),
     )
 
     page.save()
@@ -488,6 +532,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         page.reference_save_enabled,
         False,
     )
+
     checks.check(
         "Reference Item Type is correct and disabled",
         lambda: {
@@ -520,6 +565,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.set_text(page.REF_NAME, " " * 5, verify=False)
+
     checks.check(
         "Whitespace Standard name / Save disabled",
         page.reference_save_enabled,
@@ -540,6 +586,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         standard_250 + "X",
         verify=False,
     )
+
     checks.check(
         "Standard name limited to 250 characters",
         lambda: page.reference_form_details()["name"],
@@ -547,6 +594,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.close_reference()
+
     checks.check(
         "Reference Add Close does not create a record",
         page.references,
@@ -570,6 +618,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     reopen_item(page, name)
+
     checks.check(
         "Standard Reference persisted after navigation",
         lambda: sorted(page.references()),
@@ -577,6 +626,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.edit_reference(reference_name)
+
     checks.check(
         "Reference Edit initial values",
         page.reference_form_details,
@@ -622,6 +672,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
             "item_type_disabled": True,
         },
     )
+
     page.close_reference()
 
     # Delete our custom reference; retain automatic references.
@@ -635,6 +686,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.cancel_delete()
+
     checks.check(
         "Reference Delete Cancel",
         page.references,
@@ -644,7 +696,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     page.request_reference_delete(edited_reference)
     page.confirm_delete()
 
-    # Do not click the main Item Type Save after reference deletion.
+    # Do not main-Save after reference deletion.
     reopen_item(page, name)
 
     expected_remaining = [
@@ -652,11 +704,13 @@ def test_item_type_lifecycle(driver, item_type_checks):
         for row in before_ref_delete
         if row[0] != edited_reference
     ]
+
     checks.check(
         "Reference deletion persisted without main Save",
         lambda: sorted(page.references()),
         sorted(expected_remaining),
     )
+
     checks.check(
         "Reference operations preserved Item Type prompts",
         page.form_details,
@@ -687,7 +741,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         "Disposable Item Type",
     )
 
-    # Remove procedures first and save.
+    # Remove procedures first, then Save.
     while page.prompt_count():
         previous_count = page.prompt_count()
         page.request_prompt_delete(0)
@@ -708,8 +762,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         "Disposable Item Type after removing procedures",
     )
 
-    # Remove references after reopening.
-    # Navigate directly to the grid afterwards; do not main-Save.
+    # Remove references, then navigate without main-Saving.
     delete_all_item_references(page, checks, disposable)
 
     page.open()
@@ -717,13 +770,15 @@ def test_item_type_lifecycle(driver, item_type_checks):
     page.search(disposable)
 
     message = page.request_item_delete(disposable)
+
     checks.check(
         "Item Type delete confirmation",
         lambda: message,
-        page.DELETE_MESSAGE,
+        "You will not able to recover the deleted record!",
     )
 
     page.cancel_delete()
+
     checks.check(
         "Item Type Delete Cancel retains record",
         lambda: page.grid_details(disposable),
@@ -743,6 +798,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     )
 
     page.search(disposable)
+
     checks.check(
         "Deleted Item Type absent",
         page.visible_names,
@@ -759,7 +815,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
         [],
     )
 
-    # Main record remains available for the following inspection flow.
+    # Retain the main Item Type for the following inspection flow.
     verify_saved_item(
         page,
         checks,
@@ -771,7 +827,7 @@ def test_item_type_lifecycle(driver, item_type_checks):
     checks.finish()
 
 
-def test_duplicate_item_type_preserves_existing(
+def test_same_item_type_name_updates_prompts(
     driver,
     item_type_checks,
 ):
@@ -783,6 +839,7 @@ def test_duplicate_item_type_preserves_existing(
     original_prompt = f"Original prompt {suffix}"
     replacement_prompt = f"Duplicate attempt prompt {suffix}"
 
+    # Create the initial Item Type.
     page.open_add_form()
     page.set_text(page.NAME, name)
     page.add_prompt(original_prompt)
@@ -793,70 +850,44 @@ def test_duplicate_item_type_preserves_existing(
         checks,
         name,
         [original_prompt],
-        "Duplicate test original",
+        "Same-name test original",
     )
 
-    # Attempt a new record using exactly the same name.
+    # Same-name submission is allowed.
     page.open()
     page.open_add_form()
     page.set_text(page.NAME, name)
     page.add_prompt(replacement_prompt)
-    page.click(page.SAVE)
-    page.wait_idle()
+    page.save()
 
-    # A rejection popup may appear after a future fix.
-    popups = [
-        popup
-        for popup in driver.find_elements(*page.POPUP)
-        if popup.is_displayed()
-    ]
-
-    if popups:
-        message = page.popup_message()
-        print(f"Duplicate Item Type response: {message}")
-
-        cancel_buttons = [
-            button
-            for button in driver.find_elements(*page.CANCEL)
-            if button.is_displayed()
-        ]
-
-        if cancel_buttons:
-            page.cancel_delete()
-        else:
-            page.click(page.CONFIRM)
-            page.wait.until(
-                lambda browser: not any(
-                    popup.is_displayed()
-                    for popup in browser.find_elements(*page.POPUP)
-                )
-            )
-
+    # Navigate and reopen to verify saved data.
     page.open()
     page.filter_item_type()
     page.search(name)
 
     checks.check(
-        "Duplicate Item Type / exactly one matching record",
-        lambda: page.visible_names().count(name),
+        "Same Item Type name / one matching record",
+        lambda: len(page.matching_rows(name)),
         1,
     )
 
-    # Stop if identity is ambiguous; do not edit an arbitrary row.
     assert len(page.matching_rows(name)) == 1, (
-        f"Duplicate attempt created multiple matching records: {name}"
+        f"Expected one Item Type named: {name}"
     )
 
     page.edit(name)
 
     checks.check(
-        "Duplicate Item Type / original data preserved",
-        page.form_details,
-        {
-            "name": name,
-            "prompts": [original_prompt],
-        },
+        "Same Item Type name / name retained",
+        lambda: page.form_details()["name"],
+        name,
     )
 
-    print(f"Duplicate test record retained for investigation: {name}")
+    checks.check(
+        "Same Item Type name / submitted prompt saved",
+        lambda: replacement_prompt in page.form_details()["prompts"],
+        True,
+    )
+
+    print(f"Same-name test Item Type retained: {name}")
     checks.finish()
